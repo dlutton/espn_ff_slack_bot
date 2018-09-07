@@ -10,12 +10,16 @@ proc handler(req: Request) {.async.} =
   var code = Http200
   var response: JsonNode
   var path: string
-  let endpoint = "scoreboard"
+  let scoreboard_endpoint = "scoreboard"
+  let roster_endpoint = "rosterInfo"
   # Replace seasonId and leagueId
   let
     seasonId = "xxxx"
     leagueId = "xxxxxx"
-  let params = "?leagueId=$1&seasonId=$2&matchupPeriodId=" % [leagueId, seasonId]
+    # comma separated list of teamIds
+    teamIds = "x,x,x"
+  let scoreboard_params = "?leagueId=$1&seasonId=$2&matchupPeriodId=" % [leagueId, seasonId]
+  let roster_params = "?leagueId=$1&seasonId=$2&teamIds=$3" % [leagueId, seasonId, teamIds]
 
   if req.url.path == "/scoreboard" and req.reqMethod == HttpPost:
     if isNilOrEmpty(req.body):
@@ -23,7 +27,7 @@ proc handler(req: Request) {.async.} =
     else:
       try:
         let week = formData(req)["text"]
-        path = url & endpoint & params & "$1" % week
+        path = url & scoreboard_endpoint & scoreboard_params & "$1" % week
       except KeyError:
         response = handleError()
       except:
@@ -31,7 +35,7 @@ proc handler(req: Request) {.async.} =
 
       # make call to espn api client
       if not isNilOrEmpty(path):
-        var espn = client.getContent(path)
+        let espn = client.getContent(path)
         yield espn
         if espn.failed:
           response = handleError()
@@ -39,6 +43,31 @@ proc handler(req: Request) {.async.} =
           # parse json response
           response = matchups(espn.read)
     # send response
+    await req.respond(code, pretty(response), headers)
+  elif req.url.path == "/roster" and req.reqMethod == HttpPost: 
+    var team: string
+
+    if isNilOrEmpty(req.body):
+      response = handleError()
+    else:
+      try:
+        team = toUpperAscii(decodeUrl(formData(req)["text"]))
+        path = url & roster_endpoint & roster_params
+      except KeyError: 
+        response = handleError()
+      except:
+        response = handleError()
+
+      # make call to espn api client
+      if not isNilOrEmpty(path):
+        let espn = client.getContent(path)
+        yield espn
+        if espn.failed:
+          response = handleError()
+        else:
+          # parse json response
+          response = roster(espn.read, team)
+    # send response    
     await req.respond(code, pretty(response), headers)
   else:
     await req.respond(Http404, "Not Found")

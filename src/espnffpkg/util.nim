@@ -3,10 +3,15 @@ import strutils, tables, asynchttpserver, json, times
 type
   MultiData = Table[string, string]
 
-  SlackResponse = ref object of RootObj
+  SlackResponseMatchups = ref object of RootObj
     response_type: string
     text: string
     attachments: seq[Attachments]
+
+  SlackResponseRoster = ref object of RootObj
+    response_type: string
+    text: string
+    attachments: array[1, JsonNode]
 
   Attachments = ref object of RootObj
     title: string
@@ -22,7 +27,6 @@ type
   Team = ref object of RootObj
     name: string
     score: int
-
 
 proc parseBody(body: string): MultiData =
   let items = body.split('&')
@@ -61,5 +65,29 @@ proc matchups*(response: string): JsonNode =
     attachments.add(Attachments(title: winner, text: "", color: "#5cacee", fields: fields))
 
   let week = "Week $1" % $parse["scoreboard"]["matchupPeriodId"].getInt()
-  result = %* SlackResponse(responseType: "in_channel", text: week, attachments: attachments)
-  return
+  result = %* SlackResponseMatchups(responseType: "in_channel", text: week, attachments: attachments)
+
+proc roster*(response: string, team: string): JsonNode =
+  let parse = parseJson(response)
+  var roster: string
+
+  for t in parse["leagueRosters"]["teams"]:
+    let team = replace(team,"’","'")
+    if cmpIgnoreCase(team, "$1 $2" % [t["team"]["teamLocation"].getStr(), t["team"]["teamNickname"].getStr()]) == 0:
+      roster = ""
+      for s in t["slots"]:
+        let firstName = s["player"]["firstName"].getStr()
+        let lastName = s["player"]["lastName"].getStr()
+        roster.add("$1 $2\n" % [firstName, lastName])
+    
+  let attachment = %* {
+        "title": team,
+        "text": roster,
+        "color": "#5cacee"
+  }
+  var attachments: array[1, JsonNode]
+  attachments[0] = attachment
+  if isNilOrEmpty(roster):
+    result = handleError()
+  else:
+    result = %* SlackResponseRoster(responseType: "in_channel", text: "Roster", attachments: attachments)
